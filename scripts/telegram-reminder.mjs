@@ -5,13 +5,18 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config({ path: ".env.local" });
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID ?? process.env.TELEGRAM_CHAT_ID;
 const APP_TIMEZONE = process.env.APP_TIMEZONE ?? "Asia/Ho_Chi_Minh";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY.");
+  throw new Error(
+    `Thiếu biến Supabase. SUPABASE_URL=${Boolean(SUPABASE_URL)}, SUPABASE_SERVICE_ROLE_KEY=${Boolean(
+      SUPABASE_SERVICE_ROLE_KEY,
+    )}. Hãy đặt SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY trong Railway Variables.`,
+  );
 }
 
 if (!TELEGRAM_TOKEN || !CHAT_ID) {
