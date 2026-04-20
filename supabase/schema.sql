@@ -35,3 +35,14 @@ create table if not exists public.custom_events (
 
 create index if not exists custom_events_event_date_idx on public.custom_events(event_date);
 create index if not exists custom_events_event_time_idx on public.custom_events(event_time);
+
+create table if not exists public.notification_logs (
+  id uuid primary key default gen_random_uuid(),
+  schedule_id uuid not null references public.day_schedules(id) on delete cascade,
+  work_date date not null,
+  event_type text not null,
+  sent_at timestamp with time zone not null default now(),
+  unique (schedule_id, work_date, event_type)
+);
+
+create index if not exists notification_logs_work_date_idx on public.notification_logs(work_date);

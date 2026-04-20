@@ -1,10 +1,10 @@
 # Ứng Dụng Nhắc Nhở Chấm Công
 
 Ứng dụng full-stack quản lý lịch chấm công theo tuần với:
-- Dashboard Next.js App Router
-- Tích hợp Supabase PostgreSQL
-- Worker Telegram chạy mỗi phút
-- Nhắc việc sự kiện cá nhân theo giờ chính xác
+- Frontend Next.js triển khai trên Vercel
+- Database Supabase PostgreSQL
+- Worker Node.js chạy liên tục (Railway/Render) mỗi phút
+- Gửi thông báo Telegram theo lịch check-in/check-out và sự kiện cá nhân
 - Tự động dọn dữ liệu cũ theo quy tắc thời gian
 
 ## Công Nghệ Sử Dụng
@@ -14,6 +14,7 @@
 - Supabase (`@supabase/supabase-js`)
 - Node cron (`node-cron`)
 - Telegram Bot API
+- Railway/Render (cho background worker)
 
 ## Cài Đặt
 
@@ -32,16 +33,21 @@ cp .env.example .env.local
 Điền giá trị cho:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (bắt buộc cho API server và worker)
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `TELEGRAM_TOKEN`
+- `CHAT_ID`
 - `APP_TIMEZONE`
 
-> Lưu ý: `SUPABASE_SERVICE_ROLE_KEY` là khóa quyền cao, chỉ dùng ở server/worker, không public ra client.
+> Lưu ý bảo mật:
+> - `SUPABASE_SERVICE_ROLE_KEY` và `TELEGRAM_TOKEN` chỉ dùng cho server/worker.
+> - Không commit `.env.local`.
 
 3. Tạo bảng dữ liệu trong Supabase SQL Editor:
 
 Chạy file `supabase/schema.sql`.
+
+> File schema đã bao gồm bảng `notification_logs` để chống gửi trùng thông báo.
 
 ## Chạy Ứng Dụng
 
@@ -51,29 +57,45 @@ Chạy web app:
 npm run dev
 ```
 
-Chạy worker nhắc Telegram (terminal riêng):
+Chạy worker nhắc Telegram (terminal riêng, dùng cho local):
 
 ```bash
 npm run reminder:worker
 ```
 
-## Deploy Lên Vercel
+## Kiến Trúc Deploy Khuyến Nghị
+
+- Vercel: chạy frontend Next.js
+- Railway (hoặc Render): chạy worker `scripts/telegram-reminder.mjs` liên tục mỗi phút
+- Supabase: lưu lịch và log thông báo
+
+## Deploy Frontend Lên Vercel
 
 1. Đẩy source code lên GitHub.
-2. Vào Vercel, chọn **New Project** và import repository.
-3. Trong phần **Environment Variables**, thêm:
+2. Import project vào Vercel.
+3. Cấu hình biến môi trường cho Vercel:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHAT_ID`
+   - `SUPABASE_SERVICE_ROLE_KEY` (cho API server)
    - `APP_TIMEZONE`
-   - `CRON_SECRET` (tự đặt chuỗi bí mật mạnh)
-4. Deploy project.
-5. Vercel sẽ tự chạy cron theo `vercel.json` với endpoint:
-   - `/api/cron/reminder` (mỗi phút)
+4. Deploy.
 
-> Khi đã chạy cron trên Vercel, bạn không cần giữ máy cá nhân bật để gửi nhắc việc.
+## Deploy Worker Lên Railway (chạy mỗi phút)
+
+1. Vào Railway > **New Project** > **Deploy from GitHub repo**.
+2. Chọn cùng repo hiện tại.
+3. Trong service settings, đặt Start Command:
+   - `npm run reminder:worker`
+4. Thêm Environment Variables trên Railway:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `TELEGRAM_TOKEN`
+   - `CHAT_ID`
+   - `APP_TIMEZONE`
+5. Deploy service, kiểm tra logs thấy dòng:
+   - `Worker Telegram đã khởi động. Múi giờ: ...`
+
+> Worker Railway là tiến trình luôn chạy, không phải serverless cron.
 
 ## Quy Tắc Tự Động Xóa Dữ Liệu
 
@@ -102,5 +124,5 @@ npm run reminder:worker
 - `components/WeekView.tsx` - giao diện danh sách tuần và chi tiết tuần
 - `lib/supabaseClient.ts` - Supabase client phía trình duyệt
 - `lib/supabaseServer.ts` - Supabase client phía server
-- `scripts/telegram-reminder.mjs` - worker cron gửi thông báo Telegram
+- `scripts/telegram-reminder.mjs` - worker cron chạy mỗi phút
 - `supabase/schema.sql` - schema cơ sở dữ liệu

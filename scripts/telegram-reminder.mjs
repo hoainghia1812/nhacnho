@@ -1,24 +1,24 @@
+import dotenv from "dotenv";
 import cron from "node-cron";
 import { createClient } from "@supabase/supabase-js";
 
-const {
-  NEXT_PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
-  APP_TIMEZONE = "Asia/Ho_Chi_Minh",
-} = process.env;
+dotenv.config({ path: ".env.local" });
 
-if (!NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("Thiếu NEXT_PUBLIC_SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY.");
+const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID ?? process.env.TELEGRAM_CHAT_ID;
+const APP_TIMEZONE = process.env.APP_TIMEZONE ?? "Asia/Ho_Chi_Minh";
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY.");
 }
 
-if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-  throw new Error("Thiếu biến môi trường Telegram.");
+if (!TELEGRAM_TOKEN || !CHAT_ID) {
+  throw new Error("Thiếu TELEGRAM_TOKEN hoặc CHAT_ID.");
 }
 
-const supabase = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-const sentNotifications = new Set();
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 function getLocalDateAndTime() {
   const dateTimeFormat = new Intl.DateTimeFormat("en-CA", {
@@ -57,14 +57,14 @@ function shiftIsoDate(dateIso, diffDays) {
 }
 
 async function sendTelegramMessage(text) {
-  const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const endpoint = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      chat_id: TELEGRAM_CHAT_ID,
+      chat_id: CHAT_ID,
       text,
     }),
   });
@@ -72,6 +72,34 @@ async function sendTelegramMessage(text) {
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Gửi Telegram thất bại: ${body}`);
+  }
+}
+
+async function wasNotificationSent(scheduleId, workDate, eventType) {
+  const { data, error } = await supabase
+    .from("notification_logs")
+    .select("id")
+    .eq("schedule_id", scheduleId)
+    .eq("work_date", workDate)
+    .eq("event_type", eventType)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Không thể kiểm tra log gửi thông báo: ${error.message}`);
+  }
+
+  return Boolean(data);
+}
+
+async function markNotificationSent(scheduleId, workDate, eventType) {
+  const { error } = await supabase.from("notification_logs").insert({
+    schedule_id: scheduleId,
+    work_date: workDate,
+    event_type: eventType,
+  });
+
+  if (error && error.code !== "23505") {
+    throw new Error(`Không thể lưu log gửi thông báo: ${error.message}`);
   }
 }
 
@@ -102,71 +130,73 @@ async function cleanupExpiredData(currentDate) {
   }
 }
 
-async function processReminders() {
-  const { date, time } = getLocalDateAndTime();
-  const currentMinutes = toMinuteValue(time);
-
-  await cleanupExpiredData(date);
-
-  for (const key of sentNotifications) {
-    if (!key.startsWith(date)) {
-      sentNotifications.delete(key);
-    }
-  }
-
-  const { data, error } = await supabase
+async function processWorkSchedules(currentDate, currentMinutes) {
+  const { data: schedules, error } = await supabase
     .from("day_schedules")
     .select("id, work_date, check_in, check_out, is_day_off")
-    .eq("work_date", date)
-    .eq("is_day_off", false);
+    .eq("work_date", currentDate);
 
   if (error) {
-    console.error("Không thể truy vấn lịch làm việc:", error.message);
+    throw new Error(`Không thể truy vấn lịch làm việc: ${error.message}`);
+  }
+
+  if (!schedules || schedules.length === 0) {
     return;
   }
 
-  if (data && data.length > 0) {
-    for (const schedule of data) {
-      const checkIn = schedule.check_in?.slice(0, 5);
-      const checkOut = schedule.check_out?.slice(0, 5);
+  for (const schedule of schedules) {
+    if (schedule.is_day_off) {
+      continue;
+    }
 
-      if (!checkIn || !checkOut) {
+    const checkIn = schedule.check_in?.slice(0, 5);
+    const checkOut = schedule.check_out?.slice(0, 5);
+    if (!checkIn || !checkOut) {
+      continue;
+    }
+
+    const events = [
+      {
+        eventType: "before_check_in",
+        atMinute: toMinuteValue(checkIn) - 15,
+        message: `⏰ Còn 15 phút nữa đến giờ check-in (${checkIn}).`,
+      },
+      {
+        eventType: "check_in",
+        atMinute: toMinuteValue(checkIn),
+        message: "⏰ Đến giờ check-in.",
+      },
+      {
+        eventType: "check_out",
+        atMinute: toMinuteValue(checkOut),
+        message: "⏰ Đến giờ check-out.",
+      },
+    ];
+
+    for (const event of events) {
+      if (currentMinutes !== event.atMinute) {
         continue;
       }
 
-      const checkInMinutes = toMinuteValue(checkIn);
-      const checkOutMinutes = toMinuteValue(checkOut);
-      const beforeCheckInMinutes = checkInMinutes - 15;
-
-      const beforeKey = `${date}:${schedule.id}:before_check_in`;
-      const inKey = `${date}:${schedule.id}:check_in`;
-      const outKey = `${date}:${schedule.id}:check_out`;
-
-      if (currentMinutes === beforeCheckInMinutes && !sentNotifications.has(beforeKey)) {
-        await sendTelegramMessage(`⏰ Còn 15 phút nữa đến giờ check-in (${checkIn}).`);
-        sentNotifications.add(beforeKey);
+      const alreadySent = await wasNotificationSent(schedule.id, schedule.work_date, event.eventType);
+      if (alreadySent) {
+        continue;
       }
 
-      if (currentMinutes === checkInMinutes && !sentNotifications.has(inKey)) {
-        await sendTelegramMessage("⏰ Đến giờ check-in.");
-        sentNotifications.add(inKey);
-      }
-
-      if (currentMinutes === checkOutMinutes && !sentNotifications.has(outKey)) {
-        await sendTelegramMessage("⏰ Đến giờ check-out.");
-        sentNotifications.add(outKey);
-      }
+      await sendTelegramMessage(event.message);
+      await markNotificationSent(schedule.id, schedule.work_date, event.eventType);
     }
   }
+}
 
-  const { data: events, error: eventsError } = await supabase
+async function processCustomEvents(currentDate, currentMinutes) {
+  const { data: events, error } = await supabase
     .from("custom_events")
-    .select("id, title, event_date, event_time, message")
-    .eq("event_date", date);
+    .select("title, event_time, message")
+    .eq("event_date", currentDate);
 
-  if (eventsError) {
-    console.error("Không thể truy vấn sự kiện cá nhân:", eventsError.message);
-    return;
+  if (error) {
+    throw new Error(`Không thể truy vấn sự kiện cá nhân: ${error.message}`);
   }
 
   if (!events || events.length === 0) {
@@ -179,23 +209,29 @@ async function processReminders() {
       continue;
     }
 
-    const eventMinutes = toMinuteValue(eventTime);
-    const eventKey = `${date}:${event.id}:custom_event`;
-
-    if (currentMinutes === eventMinutes && !sentNotifications.has(eventKey)) {
+    if (currentMinutes === toMinuteValue(eventTime)) {
       await sendTelegramMessage(`📌 ${event.title}\n${event.message}`);
-      sentNotifications.add(eventKey);
     }
   }
 }
 
-console.log(`Worker nhắc việc Telegram đã khởi động. Múi giờ: ${APP_TIMEZONE}`);
-void processReminders();
+async function processReminders() {
+  const { date, time } = getLocalDateAndTime();
+  const currentMinutes = toMinuteValue(time);
 
-cron.schedule("* * * * *", async () => {
+  await cleanupExpiredData(date);
+  await processWorkSchedules(date, currentMinutes);
+  await processCustomEvents(date, currentMinutes);
+}
+
+async function runSafely() {
   try {
     await processReminders();
   } catch (error) {
-    console.error("Chạy nhắc việc thất bại:", error);
+    console.error("Chạy nhắc việc thất bại:", error instanceof Error ? error.message : error);
   }
-});
+}
+
+console.log(`Worker Telegram đã khởi động. Múi giờ: ${APP_TIMEZONE}`);
+await runSafely();
+cron.schedule("* * * * *", runSafely);
