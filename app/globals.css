@@ -24,3 +24,39 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.luxury-datepicker {
+  border: 1px solid #dbe4f0 !important;
+  border-radius: 0.9rem !important;
+  box-shadow: 0 20px 40px -24px rgba(15, 23, 42, 0.45) !important;
+  overflow: hidden;
+}
+
+.luxury-datepicker .react-datepicker__header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+  border-bottom: 0;
+}
+
+.luxury-datepicker .react-datepicker__current-month,
+.luxury-datepicker .react-datepicker-time__header,
+.luxury-datepicker .react-datepicker-year-header,
+.luxury-datepicker .react-datepicker__day-name {
+  color: #e2e8f0;
+}
+
+.luxury-datepicker .react-datepicker__day {
+  border-radius: 0.55rem;
+  color: #334155;
+}
+
+.luxury-datepicker .react-datepicker__day:hover,
+.luxury-datepicker .react-datepicker__time-list-item:hover {
+  background: #e0ecff !important;
+}
+
+.luxury-datepicker .react-datepicker__day--selected,
+.luxury-datepicker .react-datepicker__day--keyboard-selected,
+.luxury-datepicker .react-datepicker__time-list-item--selected {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  color: #ffffff !important;
+}
